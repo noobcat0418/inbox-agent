@@ -7,8 +7,8 @@ Each run writes:
 - `out/summary-<date>.md` (or `backfill-<date>.md`): the **Important** emails first, then to-dos, FYI one-liners and noise.
 - `out/todos.md`: a running list of open to-dos with due dates, kept across runs.
 
-Milestone 1 is **read-only** (`gmail.readonly`). It cannot change, send or delete anything.
-Auto-labelling comes in milestone 2.
+It also adds a Gmail label to each email it sorts: `AI/Important`, `AI/To-do`, `AI/FYI` or `AI/Noise`.
+That's the only change it ever makes in Gmail (see Safety).
 
 ## Setup (once)
 
@@ -35,7 +35,11 @@ Auto-labelling comes in milestone 2.
 .\.venv\Scripts\python inbox.py                           # new mail since last run (first run: last 2 days)
 .\.venv\Scripts\python inbox.py --backfill 90d --max 200  # older mail, newest first; rerun to continue
 .\.venv\Scripts\python inbox.py --done 3 7                # close to-dos by id
+.\.venv\Scripts\python inbox.py --relabel                 # label emails processed earlier (no model calls)
+.\.venv\Scripts\python inbox.py --unlabel                 # remove every AI/ label: a full undo
 ```
+
+Add `--no-label` to any run to skip labelling.
 
 - Gmail's **Promotions** and **Social** tabs are skipped unless you pass `--all-categories`.
 - Mail you sent yourself is always skipped.
@@ -45,6 +49,10 @@ Auto-labelling comes in milestone 2.
 
 ## Safety
 
+- Gmail access is `gmail.modify`, which Google allows to do more than this tool ever does.
+  All writes live in `agent/labels.py`, which refuses any label outside `AI/`.
+  It never archives, marks read, trashes or sends.
+  `--unlabel` deletes only the `AI/` labels; your emails are not affected.
 - Sender, subject and body are treated as **untrusted**. They go to the model inside `<email>` tags it is told never to obey.
   A forged closing tag is neutralised.
 - The model can only answer with one of four categories (`important`, `todo`, `fyi`, `noise`). Anything else is rejected.

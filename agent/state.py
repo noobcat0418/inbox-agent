@@ -42,6 +42,11 @@ class State:
         rows = self.db.execute("SELECT id FROM processed WHERE category != ?", (UNCLASSIFIED,))
         return {r["id"] for r in rows}
 
+    def classified(self) -> list[sqlite3.Row]:
+        return self.db.execute(
+            "SELECT id, category FROM processed WHERE category != ?", (UNCLASSIFIED,)
+        ).fetchall()
+
     def retry_ids(self) -> list[str]:
         rows = self.db.execute(
             "SELECT id FROM processed WHERE category = ? ORDER BY received_at DESC", (UNCLASSIFIED,)

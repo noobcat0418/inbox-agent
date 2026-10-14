@@ -1,12 +1,21 @@
 """Gmail access: sign-in, listing message ids, and turning a message into plain text.
 
-Milestone 1 is read-only. The only scope requested is gmail.readonly.
+The scope is gmail.modify so labels can be added. Everything that writes is in labels.py,
+which only ever touches labels under "AI/".
 """
 import base64
 import html
+import json
 import re
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+
+def _granted_scopes(token_file) -> set[str]:
+    try:
+        return set(json.loads(token_file.read_text(encoding="utf-8")).get("scopes") or [])
+    except (OSError, ValueError):
+        return set()
 
 
 def connect(cfg):
@@ -18,7 +27,8 @@ def connect(cfg):
     from googleapiclient.discovery import build
 
     creds = None
-    if cfg.token_file.exists():
+    # A token from an older, narrower scope (e.g. read-only) means signing in again once.
+    if cfg.token_file.exists() and set(SCOPES) <= _granted_scopes(cfg.token_file):
         creds = Credentials.from_authorized_user_file(str(cfg.token_file), SCOPES)
     if creds and not creds.valid and creds.expired and creds.refresh_token:
         try:

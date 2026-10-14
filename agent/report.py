@@ -14,7 +14,7 @@ def _sender(raw: str) -> str:
     return name or raw.strip("<> ")
 
 
-def render_summary(items: list, *, run_label: str, mode: str, model: str, skipped: int) -> str:
+def render_summary(items: list, *, run_label: str, mode: str, model: str, skipped: int, labels: str = "") -> str:
     """items: list of (email, Result) in the order processed."""
     by_cat = {c: [] for c in (*CATEGORIES, UNCLASSIFIED)}
     for email, result in items:
@@ -27,6 +27,7 @@ def render_summary(items: list, *, run_label: str, mode: str, model: str, skippe
         f"- **Mode:** {mode}",
         f"- **Processed:** {len(items)} · already done earlier: {skipped}",
         f"- **Classified by:** {model if classified else 'nothing (every email failed; see Errors)'}",
+        *([f"- **Gmail labels:** {labels}"] if labels else []),
         "",
         "| important | todo | fyi | noise | unclassified |",
         "|---|---|---|---|---|",

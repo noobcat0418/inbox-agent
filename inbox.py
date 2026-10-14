@@ -5,6 +5,8 @@
   python inbox.py --backfill 90d --max 200   previous mail, newest first, resumable
   python inbox.py --dry-run                  list what would be processed; no model calls, nothing saved
   python inbox.py --done 3 7                 close to-dos by id
+  python inbox.py --relabel                  add AI/ labels to emails processed earlier (no model calls)
+  python inbox.py --unlabel                  remove every AI/ label (full undo; emails untouched)
 """
 import argparse
 import sys
@@ -14,6 +16,7 @@ from datetime import datetime
 
 from agent import config, gmail
 from agent.classify import UNCLASSIFIED, Result, classify, system_prompt
+from agent.labels import Labeler
 from agent.report import render_summary, render_todos
 from agent.state import State
 
@@ -54,6 +57,9 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="list what would be processed; no model calls, nothing saved")
     ap.add_argument("--all-categories", action="store_true", help="include Gmail's Promotions and Social tabs")
     ap.add_argument("--done", type=int, nargs="+", metavar="ID", help="mark to-dos done by id")
+    ap.add_argument("--no-label", action="store_true", help="don't add Gmail labels this run")
+    ap.add_argument("--relabel", action="store_true", help="label emails processed earlier, then exit")
+    ap.add_argument("--unlabel", action="store_true", help="remove every AI/ label, then exit")
     args = ap.parse_args(argv)
 
     cfg = config.load()
@@ -70,6 +76,20 @@ def main(argv=None) -> int:
     service = gmail.connect(cfg)
     if args.check:
         return run_check(cfg, service)
+    if args.unlabel:
+        deleted = Labeler(service).remove_all()
+        print("Removed: " + (", ".join(deleted) if deleted else "no AI labels found") + ". Emails are untouched.")
+        return 0
+    if args.relabel:
+        labeler, n = Labeler(service), 0
+        for row in state.classified():
+            try:
+                labeler.apply(row["id"], row["category"])
+                n += 1
+            except Exception as e:  # e.g. the email was deleted since it was processed
+                print(f"  could not label {row['id']}: {type(e).__name__}")
+        print(f"Labelled {n} processed email(s).")
+        return 0
 
     # Work out the window.
     run_started = int(time.time())
@@ -127,6 +147,8 @@ def main(argv=None) -> int:
         return 2
 
     system = system_prompt()
+    labeler = None if args.no_label else Labeler(service)
+    labelled = label_errors = 0
     items, interrupted, t0 = [], False, time.time()
     try:
         for i, msg_id in enumerate(queue, 1):
@@ -142,7 +164,15 @@ def main(argv=None) -> int:
             result = classify(llm, email, system)
             state.save(email, result, llm.model)
             items.append((email, result))
-            print(f"  [{i:>3}/{len(queue)}] {result.category:<12} {time.time() - start:5.1f}s  {email['subject'][:70]}")
+            note = ""
+            if labeler and result.category != UNCLASSIFIED:
+                try:
+                    note = f"  -> {labeler.apply(msg_id, result.category)}"
+                    labelled += 1
+                except Exception as e:  # a label failure never stops the run
+                    label_errors += 1
+                    note = f"  (label failed: {type(e).__name__})"
+            print(f"  [{i:>3}/{len(queue)}] {result.category:<12} {time.time() - start:5.1f}s  {email['subject'][:60]}{note}")
     except KeyboardInterrupt:
         interrupted = True
         print("\nStopped. Everything finished so far is saved; run the same command again to continue.")
@@ -151,7 +181,11 @@ def main(argv=None) -> int:
     model_label = f"{llm.model} via {cfg.llm_base_url}"
     label = f"{stamp:%Y-%m-%d %H:%M}" + (" (stopped early)" if interrupted else "")
     report_path = cfg.out_dir / f"{'backfill' if args.backfill else 'summary'}-{stamp:%Y-%m-%d-%H%M}.md"
-    report_path.write_text(render_summary(items, run_label=label, mode=mode, model=model_label, skipped=skipped), encoding="utf-8")
+    labels_note = "off (--no-label)" if not labeler else f"{labelled} applied" + (f", {label_errors} failed" if label_errors else "")
+    report_path.write_text(
+        render_summary(items, run_label=label, mode=mode, model=model_label, skipped=skipped, labels=labels_note),
+        encoding="utf-8",
+    )
     todos_path.write_text(render_todos(state.open_todos()), encoding="utf-8")
 
     # The new-mail window only moves forward after a complete, uncapped run, so nothing is skipped.
